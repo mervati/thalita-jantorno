@@ -11,12 +11,12 @@ let adminEventsBound = false;
    INIT
    ============================================= */
 document.addEventListener('DOMContentLoaded', async () => {
-    supabase.auth.onAuthStateChange((event, session) => {
+    db.auth.onAuthStateChange((event, session) => {
         if (session) showDashboard();
         else showLogin();
     });
 
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await db.auth.getSession();
     if (!session) showLogin();
 });
 
@@ -49,7 +49,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     btn.textContent = 'Entrando...';
     btn.disabled = true;
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await db.auth.signInWithPassword({ email, password });
 
     if (error) {
         errorEl.textContent = 'E-mail ou senha incorretos.';
@@ -60,7 +60,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click', async () => {
-    await supabase.auth.signOut();
+    await db.auth.signOut();
 });
 
 /* =============================================
@@ -77,19 +77,19 @@ async function loadDashboard() {
 }
 
 async function loadAdminEvents() {
-    const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false });
+    const { data } = await db.from('events').select('*').order('created_at', { ascending: false });
     allEvents = data || [];
     renderEventsList();
     populateEventSelects();
 }
 
 async function loadAdminPackages() {
-    const { data } = await supabase.from('packages').select('*').order('quantity');
+    const { data } = await db.from('packages').select('*').order('quantity');
     renderPackagesList(data || []);
 }
 
 async function loadAdminOrders(statusFilter = '') {
-    let q = supabase.from('orders').select('*').order('created_at', { ascending: false });
+    let q = db.from('orders').select('*').order('created_at', { ascending: false });
     if (statusFilter) q = q.eq('status', statusFilter);
 
     const { data } = await q;
@@ -155,7 +155,7 @@ document.getElementById('eventForm').addEventListener('submit', async (e) => {
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true; btn.textContent = 'Criando...';
 
-    const { error } = await supabase.from('events').insert({ name, date, description: desc, active: true });
+    const { error } = await db.from('events').insert({ name, date, description: desc, active: true });
 
     btn.disabled = false; btn.textContent = 'Criar Evento';
 
@@ -167,7 +167,7 @@ document.getElementById('eventForm').addEventListener('submit', async (e) => {
 
 async function deleteEvent(id) {
     if (!confirm('Excluir este evento e todas as suas fotos?')) return;
-    await supabase.from('events').delete().eq('id', id);
+    await db.from('events').delete().eq('id', id);
     await loadAdminEvents();
     await renderAdminPhotos();
 }
@@ -204,7 +204,7 @@ document.getElementById('packageForm').addEventListener('submit', async (e) => {
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true; btn.textContent = 'Criando...';
 
-    const { error } = await supabase.from('packages').insert({ name, quantity, price, description, active: true });
+    const { error } = await db.from('packages').insert({ name, quantity, price, description, active: true });
 
     btn.disabled = false; btn.textContent = 'Criar Pacote';
 
@@ -216,7 +216,7 @@ document.getElementById('packageForm').addEventListener('submit', async (e) => {
 
 async function deletePackage(id) {
     if (!confirm('Excluir este pacote?')) return;
-    await supabase.from('packages').delete().eq('id', id);
+    await db.from('packages').delete().eq('id', id);
     await loadAdminPackages();
 }
 
@@ -275,12 +275,12 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
         const ext = file.name.split('.').pop().toLowerCase();
         const path = `${eventId}/${Date.now()}-${i}.${ext}`;
 
-        const { error: uploadError } = await supabase.storage.from('photos').upload(path, file, { upsert: false });
+        const { error: uploadError } = await db.storage.from('photos').upload(path, file, { upsert: false });
         if (uploadError) { console.error(uploadError); continue; }
 
-        const { data: urlData } = supabase.storage.from('photos').getPublicUrl(path);
+        const { data: urlData } = db.storage.from('photos').getPublicUrl(path);
 
-        await supabase.from('photos').insert({
+        await db.from('photos').insert({
             event_id: eventId,
             storage_path: path,
             url: urlData.publicUrl,
@@ -306,7 +306,7 @@ async function renderAdminPhotos(eventId = '') {
     const el = document.getElementById('photosList');
     el.innerHTML = '<p class="loading-text">Carregando...</p>';
 
-    let q = supabase.from('photos').select('*, events(name)').eq('active', true).order('created_at');
+    let q = db.from('photos').select('*, events(name)').eq('active', true).order('created_at');
     if (eventId) q = q.eq('event_id', eventId);
 
     const { data } = await q;
@@ -328,8 +328,8 @@ async function renderAdminPhotos(eventId = '') {
 
 async function deletePhoto(id, storagePath) {
     if (!confirm('Excluir esta foto?')) return;
-    await supabase.from('photos').delete().eq('id', id);
-    if (storagePath) await supabase.storage.from('photos').remove([storagePath]);
+    await db.from('photos').delete().eq('id', id);
+    if (storagePath) await db.storage.from('photos').remove([storagePath]);
     await renderAdminPhotos(document.getElementById('photoFilterEvent').value);
 }
 
@@ -393,7 +393,7 @@ async function openOrderModal(orderId) {
     const photoIds = order.photo_ids || [];
     let photos = [];
     if (photoIds.length) {
-        const { data } = await supabase.from('photos').select('*').in('id', photoIds);
+        const { data } = await db.from('photos').select('*').in('id', photoIds);
         photos = data || [];
     }
 
@@ -439,7 +439,7 @@ async function openOrderModal(orderId) {
 
 async function updateStatus(status) {
     if (!currentOrderId) return;
-    await supabase.from('orders').update({ status }).eq('id', currentOrderId);
+    await db.from('orders').update({ status }).eq('id', currentOrderId);
     const order = allOrders.find(o => o.id === currentOrderId);
     if (order) order.status = status;
     closeOrderModal();

@@ -357,7 +357,7 @@ async function handleCheckoutSubmit(e) {
 
     // Salva o pedido no banco
     const photoIds = cart.map(p => p.id);
-    await supabase.from('orders').insert({
+    await db.from('orders').insert({
         customer_name: name,
         customer_phone: phone,
         customer_email: email || null,

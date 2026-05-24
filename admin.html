@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin | Thalita Jantorno</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="admin-body">
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-box">
+            <div class="logo-center">
+                <div class="logo-mark">TJ</div>
+                <span class="logo-name">Thalita Jantorno</span>
+                <span class="logo-sub">Painel Admin</span>
+            </div>
+            <form id="loginForm" novalidate>
+                <div class="form-field">
+                    <label for="loginEmail">E-mail</label>
+                    <input type="email" id="loginEmail" required placeholder="seu@email.com" autocomplete="email">
+                </div>
+                <div class="form-field">
+                    <label for="loginPassword">Senha</label>
+                    <input type="password" id="loginPassword" required placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <div class="form-error" id="loginError" style="display:none"></div>
+                <button type="submit" class="btn-primary btn-block">Entrar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" style="display:none">
+
+        <nav class="admin-nav">
+            <div class="admin-nav-logo">
+                <div class="logo-mark logo-mark-sm">TJ</div>
+                <span>Admin</span>
+            </div>
+            <div class="admin-nav-tabs" id="navTabs">
+                <button class="nav-tab active" data-section="painel">Painel</button>
+                <button class="nav-tab" data-section="eventos">Eventos</button>
+                <button class="nav-tab" data-section="fotos">Fotos</button>
+                <button class="nav-tab" data-section="pacotes">Pacotes</button>
+                <button class="nav-tab" data-section="pedidos">Pedidos</button>
+            </div>
+            <button class="btn-logout" id="logoutBtn">Sair</button>
+        </nav>
+
+        <main class="admin-main">
+
+            <!-- Seção: Painel -->
+            <section id="secPainel" class="admin-section">
+                <h2 class="admin-section-title">Visão Geral</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="statTotal">—</div>
+                        <div class="stat-label">Pedidos recebidos</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statPending">—</div>
+                        <div class="stat-label">Pendentes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statDone">—</div>
+                        <div class="stat-label">Concluídos</div>
+                    </div>
+                    <div class="stat-card stat-revenue">
+                        <div class="stat-value" id="statRevenue">R$ —</div>
+                        <div class="stat-label">Receita total</div>
+                    </div>
+                </div>
+
+                <h3 class="admin-section-subtitle">Pedidos Recentes</h3>
+                <div id="recentOrders" class="orders-table-wrap">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
+            <!-- Seção: Eventos -->
+            <section id="secEventos" class="admin-section" style="display:none">
+                <h2 class="admin-section-title">Eventos</h2>
+
+                <div class="card">
+                    <h3 class="card-title">Novo Evento</h3>
+                    <form id="eventForm" novalidate>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="eventName">Nome do evento *</label>
+                                <input type="text" id="eventName" required placeholder="Ex: Show na Praça — 24/05">
+                            </div>
+                            <div class="form-field">
+                                <label for="eventDate">Data</label>
+                                <input type="date" id="eventDate">
+                            </div>
+                        </div>
+                        <div class="form-field">
+                            <label for="eventDesc">Descrição (opcional)</label>
+                            <input type="text" id="eventDesc" placeholder="Descrição breve do evento">
+                        </div>
+                        <button type="submit" class="btn-primary">Criar Evento</button>
+                    </form>
+                </div>
+
+                <h3 class="admin-section-subtitle">Eventos Cadastrados</h3>
+                <div id="eventsList" class="list-container">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
+            <!-- Seção: Fotos -->
+            <section id="secFotos" class="admin-section" style="display:none">
+                <h2 class="admin-section-title">Upload de Fotos</h2>
+
+                <div class="card">
+                    <form id="uploadForm" novalidate>
+                        <div class="form-field">
+                            <label for="uploadEvent">Evento *</label>
+                            <select id="uploadEvent" required>
+                                <option value="">Selecione o evento</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="uploadPrice">Preço por foto (R$) *</label>
+                                <input type="number" id="uploadPrice" required min="0" step="0.01" placeholder="25.00">
+                            </div>
+                        </div>
+                        <div class="form-field">
+                            <label>Fotos *</label>
+                            <div class="upload-zone" id="uploadZone">
+                                <div class="upload-icon">📷</div>
+                                <p>Arraste as fotos aqui ou <label for="uploadFiles" class="upload-link">clique para selecionar</label></p>
+                                <small>JPG, PNG — múltiplas fotos aceitas</small>
+                                <input type="file" id="uploadFiles" multiple accept="image/jpeg,image/png,image/webp" style="display:none">
+                            </div>
+                        </div>
+
+                        <div id="uploadPreview" class="upload-preview" style="display:none"></div>
+                        <div class="upload-progress" id="uploadProgress" style="display:none">
+                            <div class="upload-progress-bar" id="uploadProgressBar"></div>
+                            <p id="uploadProgressText">Enviando...</p>
+                        </div>
+
+                        <button type="submit" class="btn-primary" id="uploadBtn" disabled>Fazer Upload</button>
+                    </form>
+                </div>
+
+                <h3 class="admin-section-subtitle">Fotos por Evento</h3>
+                <div class="form-field" style="max-width:300px">
+                    <select id="photoFilterEvent" class="select-input">
+                        <option value="">Todos os eventos</option>
+                    </select>
+                </div>
+                <div id="photosList" class="photos-admin-grid">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
+            <!-- Seção: Pacotes -->
+            <section id="secPacotes" class="admin-section" style="display:none">
+                <h2 class="admin-section-title">Pacotes</h2>
+
+                <div class="card">
+                    <h3 class="card-title">Novo Pacote</h3>
+                    <form id="packageForm" novalidate>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="pkgName">Nome do pacote *</label>
+                                <input type="text" id="pkgName" required placeholder="Ex: Pacote 3 Fotos">
+                            </div>
+                            <div class="form-field">
+                                <label for="pkgQty">Nº de fotos *</label>
+                                <input type="number" id="pkgQty" required min="1" placeholder="3">
+                            </div>
+                            <div class="form-field">
+                                <label for="pkgPrice">Preço (R$) *</label>
+                                <input type="number" id="pkgPrice" required min="0" step="0.01" placeholder="50.00">
+                            </div>
+                        </div>
+                        <div class="form-field">
+                            <label for="pkgDesc">Descrição (opcional)</label>
+                            <input type="text" id="pkgDesc" placeholder="Ex: Escolha 3 fotos favoritas">
+                        </div>
+                        <button type="submit" class="btn-primary">Criar Pacote</button>
+                    </form>
+                </div>
+
+                <h3 class="admin-section-subtitle">Pacotes Ativos</h3>
+                <div id="packagesList" class="list-container">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
+            <!-- Seção: Pedidos -->
+            <section id="secPedidos" class="admin-section" style="display:none">
+                <div class="section-header-row">
+                    <h2 class="admin-section-title">Pedidos</h2>
+                    <button class="btn-secondary" id="exportBtn">Exportar CSV</button>
+                </div>
+
+                <div class="filter-row">
+                    <select id="ordersStatusFilter" class="select-input">
+                        <option value="">Todos os status</option>
+                        <option value="pending">Pendente</option>
+                        <option value="confirmed">Confirmado</option>
+                        <option value="delivered">Entregue</option>
+                    </select>
+                </div>
+
+                <div id="ordersTableWrap" class="orders-table-wrap">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Order Detail Modal -->
+    <div class="overlay" id="orderOverlay" style="display:none">
+        <div class="modal modal-wide" id="orderModal">
+            <div class="modal-head">
+                <h3>Detalhes do Pedido</h3>
+                <button class="icon-btn" id="orderModalClose">✕</button>
+            </div>
+            <div class="modal-body" id="orderModalBody"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/config.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>

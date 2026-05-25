@@ -70,49 +70,7 @@
                 <h2 class="gallery-event-title" id="galleryEventName"></h2>
                 <div class="gallery-nav-right">
                     <span class="selected-count" id="selectedCount" style="display:none">0 selecionada(s)</span>
-                    <div class="face-search-wrap">
-                        <button class="btn-face-search" id="faceSearchBtn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                            Buscar minhas fotos
-                            <svg class="face-search-arrow" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                        </button>
-                        <div class="face-dropdown" id="faceDropdown">
-                            <button class="face-dropdown-opt" id="cameraSearchBtn">
-                                <span class="face-dropdown-icon">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                                </span>
-                                <span>
-                                    <strong>Tirar foto</strong>
-                                    <small>Use a câmera do seu dispositivo</small>
-                                </span>
-                            </button>
-                            <button class="face-dropdown-opt" id="uploadSearchBtn">
-                                <span class="face-dropdown-icon">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                                </span>
-                                <span>
-                                    <strong>Realizar upload</strong>
-                                    <small>Selecione uma foto da galeria</small>
-                                </span>
-                            </button>
-                            <p class="face-dropdown-privacy">Sua foto é analisada localmente e <strong>não é armazenada</strong>. Ao prosseguir, você aceita o uso temporário da imagem apenas para encontrar suas fotos.</p>
-                        </div>
-                    </div>
                 </div>
-            </div>
-
-            <!-- Progresso da busca facial -->
-            <div class="face-search-progress" id="faceSearchProgress" style="display:none">
-                <div class="face-progress-track">
-                    <div class="face-progress-bar" id="faceProgressBar"></div>
-                </div>
-                <p class="face-progress-text" id="faceProgressText">Carregando...</p>
-            </div>
-
-            <!-- Banner de filtro ativo -->
-            <div class="face-filter-banner" id="faceFilterBanner" style="display:none">
-                <span id="faceFilterText"></span>
-                <button class="face-filter-clear" id="faceClearBtn">Ver todas as fotos</button>
             </div>
 
             <div class="gallery-grid" id="galleryGrid"></div>
@@ -231,47 +189,8 @@
         </div>
     </div>
 
-    <!-- Modal: Câmera -->
-    <div class="overlay" id="cameraOverlay" style="display:none">
-        <div class="camera-modal">
-            <div class="modal-head">
-                <h3>Tirar foto</h3>
-                <button class="icon-btn" id="cameraClose">✕</button>
-            </div>
-            <div class="camera-body">
-                <video id="cameraVideo" autoplay playsinline muted></video>
-                <canvas id="cameraCanvas" style="display:none"></canvas>
-                <div class="camera-face-guide"></div>
-                <p class="camera-guide-text">Centralize seu rosto no oval</p>
-            </div>
-            <div class="camera-foot">
-                <button class="btn-capture" id="captureBtn">
-                    <span class="capture-ring"></span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: Selecionar rosto -->
-    <div class="overlay" id="faceSelectOverlay" style="display:none">
-        <div class="face-select-modal">
-            <div class="modal-head">
-                <h3>Qual é você na foto?</h3>
-                <button class="icon-btn" id="faceSelectClose">✕</button>
-            </div>
-            <div class="face-select-body">
-                <p class="face-select-hint">Detectamos mais de um rosto. Clique no seu para continuar a busca.</p>
-                <div class="face-select-grid" id="faceSelectGrid"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Input oculto para upload facial -->
-    <input type="file" id="faceFileInput" accept="image/*" style="display:none">
-
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="js/config.js?v=2"></script>
     <script src="js/store.js?v=4"></script>
-    <script src="js/face-search.js?v=1"></script>
 </body>
 </html>

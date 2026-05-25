@@ -251,7 +251,32 @@ async function searchGallery(qDesc) {
     const progress = document.getElementById('faceSearchProgress');
     progress.style.display = '';
 
-    const photos  = galleryPhotos;
+    const photos = galleryPhotos;
+
+    setProgress(0.2, 'Buscando descritores no banco...');
+
+    // Caminho rápido: usa descritores pré-calculados pelo admin (sem baixar fotos)
+    const { data: rows } = await db
+        .from('face_descriptors')
+        .select('photo_id, descriptor')
+        .in('photo_id', photos.map(p => p.id));
+
+    if (rows && rows.length > 0) {
+        setProgress(0.6, `Comparando com ${rows.length} rosto(s) cadastrado(s)...`);
+
+        const matchedIds = new Set();
+        for (const row of rows) {
+            if (faceapi.euclideanDistance(qDesc, row.descriptor) < FACE_THRESHOLD) {
+                matchedIds.add(row.photo_id);
+            }
+        }
+
+        progress.style.display = 'none';
+        applyFaceFilter(photos.filter(p => matchedIds.has(p.id)));
+        return;
+    }
+
+    // Fallback: baixa e analisa cada foto individualmente (evento ainda não processado)
     const matches = [];
     let errors    = 0;
 

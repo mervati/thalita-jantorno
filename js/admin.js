@@ -134,7 +134,8 @@ function renderEventsList() {
 function populateEventSelects() {
     const selects = [
         document.getElementById('uploadEvent'),
-        document.getElementById('photoFilterEvent')
+        document.getElementById('photoFilterEvent'),
+        document.getElementById('descriptorFilterEvent')
     ];
     selects.forEach(sel => {
         const defaultOpt = sel.options[0];
@@ -493,19 +494,24 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
 
             const { data: urlData } = db.storage.from('photos').getPublicUrl(path);
 
-            const { error: dbError } = await db.from('photos').insert({
+            const { data: photoData, error: dbError } = await db.from('photos').insert({
                 event_id: eventId,
                 storage_path: path,
                 url: urlData.publicUrl,
                 price: price,
                 active: true
-            });
+            }).select('id').single();
 
             if (dbError) {
                 console.error(`Erro ao salvar ${file.name} no banco:`, dbError);
                 failedFiles.push(file.name);
             } else {
                 successCount++;
+                // Calcula descritores faciais em segundo plano — não bloqueia o upload
+                if (photoData?.id) {
+                    computeAndSaveDescriptors(photoData.id, file)
+                        .catch(e => console.warn('[FaceDesc] erro em', file.name, e));
+                }
             }
         } catch (e) {
             console.error(`Erro inesperado em ${file.name}:`, e);
@@ -800,6 +806,9 @@ function bindAdminEvents() {
 
     // Export
     document.getElementById('exportBtn').addEventListener('click', exportCSV);
+
+    // Processar descritores faciais
+    document.getElementById('processDescriptorsBtn')?.addEventListener('click', processExistingDescriptors);
 }
 
 /* =============================================
@@ -823,6 +832,169 @@ function formatDateTime(iso) {
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/* =============================================
+   FACE API — DESCRITORES FACIAIS
+   ============================================= */
+let adminFaceApiReady   = false;
+let adminFaceApiLoading = false;
+const ADMIN_FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+
+async function ensureFaceApiAdmin() {
+    if (adminFaceApiReady) return true;
+    if (adminFaceApiLoading) {
+        await new Promise(resolve => {
+            const t = setInterval(() => { if (!adminFaceApiLoading) { clearInterval(t); resolve(); } }, 150);
+        });
+        return adminFaceApiReady;
+    }
+    adminFaceApiLoading = true;
+    try {
+        if (typeof faceapi === 'undefined') {
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+                s.onload = resolve;
+                s.onerror = () => reject(new Error('face-api não carregou'));
+                document.head.appendChild(s);
+            });
+        }
+        await Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri(ADMIN_FACE_MODEL_URL),
+            faceapi.nets.faceLandmark68Net.loadFromUri(ADMIN_FACE_MODEL_URL),
+            faceapi.nets.faceRecognitionNet.loadFromUri(ADMIN_FACE_MODEL_URL),
+        ]);
+        adminFaceApiReady = true;
+    } catch (e) {
+        console.error('[AdminFace] Erro ao carregar modelos:', e);
+    }
+    adminFaceApiLoading = false;
+    return adminFaceApiReady;
+}
+
+async function computeAndSaveDescriptors(photoId, fileOrBlob) {
+    const ok = await ensureFaceApiAdmin();
+    if (!ok) return;
+
+    const url = URL.createObjectURL(fileOrBlob);
+    let img;
+    try {
+        img = await new Promise((resolve, reject) => {
+            const i = new Image();
+            i.onload  = () => resolve(i);
+            i.onerror = reject;
+            i.src = url;
+        });
+    } finally {
+        URL.revokeObjectURL(url);
+    }
+
+    const dets = await faceapi
+        .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+    const rows = (dets || [])
+        .filter(d => d.detection.box.width >= 40 && d.detection.box.height >= 40)
+        .map(d => ({ photo_id: photoId, descriptor: Array.from(d.descriptor) }));
+
+    if (rows.length) {
+        await db.from('face_descriptors').insert(rows);
+    }
+}
+
+async function processExistingDescriptors() {
+    const btn          = document.getElementById('processDescriptorsBtn');
+    const progressWrap = document.getElementById('descriptorProgress');
+    const progressBar  = document.getElementById('descriptorProgressBar');
+    const progressText = document.getElementById('descriptorProgressText');
+    const eventId      = document.getElementById('descriptorFilterEvent').value;
+
+    btn.disabled = true;
+    progressWrap.style.display = '';
+    progressBar.style.width    = '0%';
+    progressText.textContent   = 'Carregando modelos de IA (só na 1ª vez)...';
+
+    const ok = await ensureFaceApiAdmin();
+    if (!ok) {
+        btn.disabled = false;
+        progressWrap.style.display = 'none';
+        alert('Não foi possível carregar os modelos de IA. Verifique sua conexão.');
+        return;
+    }
+
+    let q = db.from('photos').select('id, storage_path').eq('active', true);
+    if (eventId) q = q.eq('event_id', eventId);
+    const { data: photos } = await q;
+
+    if (!photos || !photos.length) {
+        btn.disabled = false;
+        progressWrap.style.display = 'none';
+        alert('Nenhuma foto encontrada.');
+        return;
+    }
+
+    // Descobre quais já têm descritor
+    const { data: existing } = await db
+        .from('face_descriptors')
+        .select('photo_id')
+        .in('photo_id', photos.map(p => p.id));
+
+    const existingIds = new Set((existing || []).map(r => r.photo_id));
+    const pending = photos.filter(p => !existingIds.has(p.id));
+
+    if (!pending.length) {
+        btn.disabled = false;
+        progressWrap.style.display = 'none';
+        alert('Todas as fotos já estão processadas!');
+        return;
+    }
+
+    let done = 0;
+    let errors = 0;
+
+    for (const photo of pending) {
+        progressBar.style.width  = `${Math.round((done / pending.length) * 100)}%`;
+        progressText.textContent = `Processando ${done + 1} de ${pending.length}...`;
+
+        try {
+            const { data: sd } = await db.storage.from('photos').createSignedUrl(photo.storage_path, 60);
+            if (!sd?.signedUrl) { errors++; done++; continue; }
+
+            const img = await new Promise((resolve, reject) => {
+                const i = new Image();
+                i.crossOrigin = 'anonymous';
+                i.onload  = () => resolve(i);
+                i.onerror = reject;
+                i.src = sd.signedUrl;
+            });
+
+            const dets = await faceapi
+                .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
+                .withFaceLandmarks()
+                .withFaceDescriptors();
+
+            const rows = (dets || [])
+                .filter(d => d.detection.box.width >= 40 && d.detection.box.height >= 40)
+                .map(d => ({ photo_id: photo.id, descriptor: Array.from(d.descriptor) }));
+
+            if (rows.length) await db.from('face_descriptors').insert(rows);
+        } catch (e) {
+            errors++;
+        }
+
+        done++;
+        await new Promise(r => setTimeout(r, 0)); // libera o browser entre fotos
+    }
+
+    progressBar.style.width  = '100%';
+    progressText.textContent = `Concluído! ${done - errors} foto(s) processada(s)${errors ? `, ${errors} com erro` : ''}.`;
+
+    setTimeout(() => {
+        progressWrap.style.display = 'none';
+        btn.disabled = false;
+    }, 3000);
 }
 
 async function convertHeicToJpeg(file) {

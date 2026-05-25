@@ -3,8 +3,9 @@
    Usa @vladmandic/face-api (roda no browser)
    ============================================= */
 
-const FACE_MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-const FACE_THRESHOLD = 0.45;
+const FACE_MODEL_URL  = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+const FACE_THRESHOLD  = 0.42;   // distância euclideana — mais rígido com SSD
+const MIN_FACE_PX     = 40;     // rosto abaixo disso gera descritor pobre
 
 let faceApiReady   = false;
 let faceApiLoading = false;
@@ -37,11 +38,11 @@ async function ensureFaceApi() {
             throw new Error('Biblioteca face-api não carregou.');
         }
 
-        setProgress(0.1, 'Carregando modelos de reconhecimento facial...');
+        setProgress(0.1, 'Carregando modelos de IA (pode levar alguns segundos na 1ª vez)...');
 
         await Promise.all([
-            faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
-            faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+            faceapi.nets.ssdMobilenetv1.loadFromUri(FACE_MODEL_URL),   // detector robusto
+            faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL), // landmarks completo
             faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL_URL),
         ]);
 
@@ -106,7 +107,13 @@ function capturePhoto() {
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
-    canvas.toBlob(blob => { closeCamera(); startFaceSearch(blob); }, 'image/jpeg', 0.92);
+    canvas.toBlob(blob => {
+        // Limpa o canvas imediatamente — frame não fica armazenado
+        canvas.width = 1; canvas.height = 1;
+        canvas.getContext('2d').clearRect(0, 0, 1, 1);
+        closeCamera();
+        startFaceSearch(blob);
+    }, 'image/jpeg', 0.92);
 }
 
 /* =============================================
@@ -140,35 +147,49 @@ async function startFaceSearch(imageBlob) {
     let queryImg;
     try {
         queryImg = await blobToImage(imageBlob);
+        imageBlob = null; // blob não é mais necessário após virar HTMLImageElement
     } catch (e) {
         progress.style.display = 'none';
         alert('Erro ao processar a imagem enviada. Tente outro arquivo.');
         return;
     }
 
-    // Detecta TODOS os rostos da foto enviada
-    const queryDets = await faceapi
-        .detectAllFaces(queryImg, new faceapi.TinyFaceDetectorOptions({ inputSize: 608 }))
+    // Detecta TODOS os rostos com SSD (detector robusto)
+    const allDets = await faceapi
+        .detectAllFaces(queryImg, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
         .withFaceLandmarks()
         .withFaceDescriptors();
 
-    if (!queryDets || !queryDets.length) {
+    // Filtra rostos muito pequenos (descritor seria impreciso)
+    const queryDets = (allDets || []).filter(d =>
+        d.detection.box.width  >= MIN_FACE_PX &&
+        d.detection.box.height >= MIN_FACE_PX
+    );
+
+    if (!queryDets.length) {
+        queryImg = null;
         progress.style.display = 'none';
-        alert('Nenhum rosto foi detectado na foto enviada.\n\nDicas:\n• Use uma foto com rosto bem visível e centralizado\n• Boa iluminação ajuda muito\n• Evite óculos escuros ou máscaras');
+        alert('Nenhum rosto foi detectado na foto enviada.\n\nDicas:\n• Use uma foto com rosto bem visível e centralizado\n• Boa iluminação ajuda muito\n• Evite óculos escuros ou máscaras\n• Tente uma foto mais próxima do rosto');
         return;
     }
 
     let selectedDescriptor;
 
     if (queryDets.length === 1) {
-        // Só um rosto — segue automaticamente
         selectedDescriptor = queryDets[0].descriptor;
+        queryImg = null; // descarta imagem — descritor já foi extraído
         await searchGallery(selectedDescriptor);
     } else {
-        // Mais de um rosto — pergunta qual é o usuário
+        // Ordena por tamanho antes de mostrar as opções
+        queryDets.sort((a, b) =>
+            (b.detection.box.width * b.detection.box.height) -
+            (a.detection.box.width * a.detection.box.height)
+        );
         progress.style.display = 'none';
+        // pickFace usa queryImg só para gerar thumbnails, depois é descartado internamente
         selectedDescriptor = await pickFace(queryImg, queryDets);
-        if (!selectedDescriptor) return; // usuário cancelou
+        queryImg = null; // descarta imagem após geração dos thumbnails
+        if (!selectedDescriptor) return;
         progress.style.display = '';
         await searchGallery(selectedDescriptor);
     }
@@ -239,9 +260,11 @@ async function searchGallery(qDesc) {
         setProgress(pct, `Verificando foto ${i + 1} de ${photos.length}...`);
 
         try {
-            const img  = await urlToImage(photos[i].url, true);
+            // URL assinada de 30s — suficiente para baixar e processar a foto
+            const { data: sd } = await db.storage.from('photos').createSignedUrl(photos[i].storage_path, 30);
+            const img  = await urlToImage(sd?.signedUrl || photos[i].url, false);
             const dets = await faceapi
-                .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 416 }))
+                .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 }))
                 .withFaceLandmarks()
                 .withFaceDescriptors();
 
@@ -289,9 +312,9 @@ function applyFaceFilter(matches) {
     banner.style.display = 'flex';
     empty.style.display  = 'none';
 
-    grid.innerHTML = matches.map(photo => `
+    grid.innerHTML = matches.map((photo, idx) => `
         <div class="photo-card" id="card-${photo.id}" data-id="${photo.id}" onclick="togglePhoto('${photo.id}')">
-            <img src="${photo.url}" alt="Foto ${photo.seq}" loading="lazy">
+            <canvas class="photo-canvas" data-idx="${idx}"></canvas>
             <div class="photo-overlay">
                 <span class="photo-num">Foto #${photo.seq}</span>
                 <span class="photo-price-tag">${formatPrice(photo.price)}</span>
@@ -300,6 +323,9 @@ function applyFaceFilter(matches) {
             <button class="photo-preview-btn" onclick="openPreview('${photo.id}', event)" title="Ver ampliada">⤢</button>
         </div>
     `).join('');
+
+    // Renderiza marca d'água nos resultados — URL vem de galleryPhotos, não do DOM
+    setupWatermarkObserver();
 
     cart.forEach(p => {
         document.getElementById(`card-${p.id}`)?.classList.add('selected');

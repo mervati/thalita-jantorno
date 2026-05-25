@@ -543,9 +543,16 @@ async function renderAdminPhotos(eventId = '') {
 
     if (!photos.length) { el.innerHTML = '<p class="loading-text">Nenhuma foto encontrada.</p>'; return; }
 
+    // URLs assinadas de 5 min para exibição no painel admin
+    const adminUrls = await Promise.all(photos.map(p =>
+        p.storage_path
+            ? db.storage.from('photos').createSignedUrl(p.storage_path, 300).then(({ data: d }) => d?.signedUrl || '')
+            : Promise.resolve('')
+    ));
+
     el.innerHTML = photos.map((p, i) => `
         <div class="photo-admin-card">
-            <img src="${p.url}" alt="Foto ${i+1}" loading="lazy">
+            <img src="${adminUrls[i]}" alt="Foto ${i+1}" loading="lazy">
             <div class="photo-admin-overlay">
                 <div class="photo-admin-num">Foto #${i+1}</div>
                 <div class="photo-admin-price">${formatPrice(p.price)}</div>
@@ -654,6 +661,13 @@ async function openOrderModal(orderId) {
         photos = data || [];
     }
 
+    // URLs assinadas de 5 min para os previews do pedido
+    const orderUrls = await Promise.all(photos.map(p =>
+        p.storage_path
+            ? db.storage.from('photos').createSignedUrl(p.storage_path, 300).then(({ data: d }) => d?.signedUrl || '')
+            : Promise.resolve('')
+    ));
+
     const body = document.getElementById('orderModalBody');
     body.innerHTML = `
         <div class="order-detail-grid">
@@ -679,7 +693,7 @@ async function openOrderModal(orderId) {
         ${order.customer_notes ? `<p><strong>Observações:</strong> ${order.customer_notes}</p>` : ''}
         <h4 style="margin:14px 0 8px;font-size:14px;color:var(--text-muted)">Fotos (${photos.length})</h4>
         <div class="order-photos-grid">
-            ${photos.map(p => `<img class="order-photo-preview" src="${p.url}" alt="Foto">`).join('')}
+            ${photos.map((p, i) => `<img class="order-photo-preview" src="${orderUrls[i]}" alt="Foto">`).join('')}
         </div>
         <div class="order-status-actions">
             <span style="font-size:13px;color:var(--text-muted);margin-right:4px">Atualizar status:</span>

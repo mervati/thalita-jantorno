@@ -75,12 +75,12 @@ function renderEventCards() {
 
     grid.innerHTML = eventsWithPhotos.map(ev => {
         const evPhotos = allPhotos.filter(p => p.event_id === ev.id);
-        const cover    = evPhotos[0]?.url || '';
         const count    = evPhotos.length;
+        const path     = evPhotos[0]?.storage_path || '';
 
         return `
         <div class="event-card" onclick="selectEvent('${ev.id}')">
-            <div class="event-card-img" style="background-image:url('${cover}')">
+            <div class="event-card-img" data-cover-path="${path}">
                 <div class="event-card-overlay"></div>
                 <div class="event-card-badge">${count} foto${count !== 1 ? 's' : ''}</div>
             </div>
@@ -93,6 +93,16 @@ function renderEventCards() {
             </div>
         </div>`;
     }).join('');
+
+    // Carrega as capas dos eventos com URL assinada de 5 min (assíncrono, não bloqueia render)
+    document.querySelectorAll('.event-card-img[data-cover-path]').forEach(async el => {
+        const path = el.dataset.coverPath;
+        if (!path) return;
+        try {
+            const url = await signedUrl(path, 300);
+            el.style.backgroundImage = `url('${url}')`;
+        } catch (_) {}
+    });
 }
 
 /* =============================================
@@ -155,6 +165,126 @@ function renderPackages(packages) {
 }
 
 /* =============================================
+   MARCA D'ÁGUA
+   ============================================= */
+let wmObserver = null;
+
+function loadImageCors(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload  = () => resolve(img);
+        img.onerror = reject;
+        img.src = url; // URL assinada já é única — sem cache-bust
+    });
+}
+
+async function signedUrl(storagePath, expiresIn = 30) {
+    const { data, error } = await db.storage
+        .from('photos')
+        .createSignedUrl(storagePath, expiresIn);
+    if (error || !data?.signedUrl) throw new Error('URL assinada falhou: ' + storagePath);
+    return data.signedUrl;
+}
+
+function applyWatermark(ctx, w, h) {
+    const size  = Math.max(16, Math.min(w, h) / 18);
+    const text  = 'Thalita Jantorno';
+    const stepX = size * 6.5;
+    const stepY = size * 4;
+
+    ctx.save();
+    ctx.font         = `bold ${size}px Arial, sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = '#ffffff';
+    ctx.shadowColor  = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur   = 4;
+
+    // Primeira camada — diagonal -30°
+    ctx.globalAlpha = 0.45;
+    for (let y = -stepY * 2; y < h + stepY * 2; y += stepY) {
+        for (let x = -stepX * 2; x < w + stepX * 2; x += stepX) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(-Math.PI / 6);
+            ctx.fillText(text, 0, 0);
+            ctx.restore();
+        }
+    }
+
+    // Segunda camada — diagonal +30° (offset) para cobrir brechas
+    ctx.globalAlpha = 0.25;
+    for (let y = -stepY * 2 + stepY / 2; y < h + stepY * 2; y += stepY) {
+        for (let x = -stepX * 2 + stepX / 2; x < w + stepX * 2; x += stepX) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(Math.PI / 6);
+            ctx.fillText(text, 0, 0);
+            ctx.restore();
+        }
+    }
+
+    ctx.restore();
+}
+
+async function renderWatermark(url, canvas, isThumb = false) {
+    try {
+        const img = await loadImageCors(url);
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+
+        if (isThumb) {
+            // Miniatura: recorta para cobrir o canvas (object-fit: cover)
+            const TW = 600, TH = 450; // resolução interna do thumb
+            canvas.width  = TW;
+            canvas.height = TH;
+            const ctx = canvas.getContext('2d');
+            const ratio = Math.max(TW / W, TH / H);
+            const sw = TW / ratio, sh = TH / ratio;
+            const sx = (W - sw) / 2, sy = (H - sh) / 2;
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TW, TH);
+            applyWatermark(ctx, TW, TH);
+        } else {
+            // Preview: imagem em tamanho real
+            canvas.width  = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            applyWatermark(ctx, W, H);
+        }
+    } catch (e) {
+        console.warn('[Watermark] falha ao renderizar:', url, e);
+    }
+}
+
+function setupWatermarkObserver() {
+    if (wmObserver) wmObserver.disconnect();
+    wmObserver = new IntersectionObserver(entries => {
+        entries.forEach(async entry => {
+            if (!entry.isIntersecting) return;
+            const canvas = entry.target;
+            wmObserver.unobserve(canvas);
+            if (canvas.dataset.rendered) return;
+            canvas.dataset.rendered = '1';
+
+            const photo = galleryPhotos[parseInt(canvas.dataset.idx)];
+            if (!photo) return;
+
+            try {
+                // Gera URL assinada de 30s só no momento do carregamento
+                const url = await signedUrl(photo.storage_path, 30);
+                renderWatermark(url, canvas, true);
+            } catch (e) {
+                console.warn('[Gallery] falha ao assinar URL:', e);
+            }
+        });
+    }, { rootMargin: '250px' });
+
+    document.querySelectorAll('.photo-canvas').forEach(c => wmObserver.observe(c));
+}
+
+/* =============================================
    RENDERIZAR GALERIA
    ============================================= */
 function renderGallery(photos) {
@@ -168,9 +298,9 @@ function renderGallery(photos) {
     }
     showEmpty(false);
 
-    grid.innerHTML = photos.map(photo => `
+    grid.innerHTML = photos.map((photo, idx) => `
         <div class="photo-card" id="card-${photo.id}" data-id="${photo.id}" onclick="togglePhoto('${photo.id}')">
-            <img src="${photo.url}" alt="Foto ${photo.seq}" loading="lazy">
+            <canvas class="photo-canvas" data-idx="${idx}"></canvas>
             <div class="photo-overlay">
                 <span class="photo-num">Foto #${photo.seq}</span>
                 <span class="photo-price-tag">${formatPrice(photo.price)}</span>
@@ -179,6 +309,8 @@ function renderGallery(photos) {
             <button class="photo-preview-btn" onclick="openPreview('${photo.id}', event)" title="Ver ampliada">⤢</button>
         </div>
     `).join('');
+
+    setupWatermarkObserver();
 }
 
 /* =============================================
@@ -284,16 +416,22 @@ function updateCart() {
     if (cart.length === 0) {
         itemsEl.innerHTML = '<p class="cart-empty">Nenhuma foto selecionada ainda</p>';
     } else {
-        itemsEl.innerHTML = cart.map(photo => `
+        itemsEl.innerHTML = cart.map(photo => {
+            // Reutiliza canvas já renderizado da galeria (sem nova requisição de rede)
+            const gc = document.querySelector(`#card-${photo.id} .photo-canvas`);
+            const thumbSrc = (gc && gc.dataset.rendered) ? gc.toDataURL('image/jpeg', 0.4) : '';
+            return `
             <div class="cart-item">
-                <img class="cart-item-thumb" src="${photo.url}" alt="Foto ${photo.seq}">
+                ${thumbSrc
+                    ? `<img class="cart-item-thumb" src="${thumbSrc}" alt="Foto ${photo.seq}">`
+                    : `<div class="cart-item-thumb"></div>`}
                 <div class="cart-item-info">
                     <div class="cart-item-label">Foto #${photo.seq}</div>
                     <div class="cart-item-price">${activePackage ? 'inclusa no pacote' : formatPrice(photo.price)}</div>
                 </div>
                 <button class="cart-item-remove" onclick="togglePhoto('${photo.id}')" title="Remover">✕</button>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     }
 
     // Subtotal e desconto
@@ -380,19 +518,29 @@ function openPreview(photoId, e) {
     showPreview();
 }
 
-function showPreview() {
+async function showPreview() {
     const photo  = galleryPhotos[previewIndex];
-    const overlay = document.getElementById('previewOverlay');
+    const canvas = document.getElementById('previewImg');
 
-    document.getElementById('previewImg').src         = photo.url;
-    document.getElementById('previewLabel').textContent = `Foto #${photo.seq}`;
-    document.getElementById('previewPrice').textContent = formatPrice(photo.price);
+    // Limpa canvas enquanto gera URL e carrega
+    canvas.width = 4; canvas.height = 3;
+
+    document.getElementById('previewLabel').textContent  = `Foto #${photo.seq}`;
+    document.getElementById('previewPrice').textContent  = formatPrice(photo.price);
 
     const isSelected = cart.some(p => p.id === photo.id);
     document.getElementById('previewSelectBtn').textContent = isSelected ? 'Remover seleção' : 'Selecionar foto';
 
-    overlay.style.display = 'flex';
+    document.getElementById('previewOverlay').style.display = 'flex';
     document.body.style.overflow = 'hidden';
+
+    try {
+        // URL assinada de 30s — só válida durante o carregamento
+        const url = await signedUrl(photo.storage_path, 30);
+        renderWatermark(url, canvas, false);
+    } catch (e) {
+        console.warn('[Preview] falha ao assinar URL:', e);
+    }
 }
 
 function closePreview() {
@@ -570,6 +718,14 @@ function bindEvents() {
 
     // Voltar para eventos
     document.getElementById('backToEventsBtn').addEventListener('click', backToEvents);
+
+    // Proteção: bloqueia menu de contexto e arraste na galeria e no preview
+    ['galleryGrid', 'previewOverlay'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('contextmenu', e => e.preventDefault());
+        el.addEventListener('dragstart',   e => e.preventDefault());
+    });
 }
 
 /* =============================================

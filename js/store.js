@@ -378,32 +378,32 @@ async function handleCheckoutSubmit(e) {
 }
 
 function buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber }) {
-    const photoList = cart.map(p => {
-        const eventName = p.events?.name || '';
-        return `• Foto #${p.seq}${eventName ? ` (${eventName})` : ''}${activePackage ? '' : ` — ${formatPrice(p.price)}`}`;
-    }).join('\n');
-
     const numFormatado = orderNumber ? String(orderNumber).padStart(4, '0') : '----';
 
+    const photoList = cart.map(p => {
+        const eventName = p.events?.name || '';
+        const price = activePackage ? '' : ` — ${formatPrice(p.price)}`;
+        return `* Foto #${p.seq}${eventName ? ` (${eventName})` : ''}${price}`;
+    }).join('\n');
+
     const lines = [
-        'Olá, Thalita! 😊',
+        `Olá, ${name}!`,
+        'Obrigada pelo pedido.',
         '',
-        `*📸 Pedido #${numFormatado} — Thalita Jantorno Fotografia*`,
+        `Pedido #${numFormatado} — Thalita Jantorno Fotografia`,
         '',
-        `*Cliente:* ${name}`,
-        `*WhatsApp:* ${phone}`,
-        email ? `*E-mail:* ${email}` : null,
+        `Cliente: ${name}`,
+        `WhatsApp: ${phone}`,
+        `E-mail: ${email || ''}`,
         '',
-        activePackage
-            ? `*Pacote:* ${activePackage.name} (${activePackage.quantity} fotos)`
-            : null,
-        `*Fotos selecionadas (${cart.length}):*`,
+        activePackage ? `Pacote: ${activePackage.name} (${activePackage.quantity} fotos)` : null,
+        `Fotos selecionadas (${cart.length}):`,
         photoList,
         '',
-        `*💰 Total: ${formatPrice(total)}*`,
-        notes ? `\n*Observações:* ${notes}` : null,
+        `Total: ${formatPrice(total)}`,
+        notes ? `\nObservações: ${notes}` : null,
         '',
-        '_Mensagem gerada pelo site._'
+        'Mensagem gerada pelo site.'
     ].filter(l => l !== null).join('\n');
 
     return lines;

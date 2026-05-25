@@ -1131,7 +1131,25 @@ a { color: var(--gold); text-decoration: none; }
     background: var(--surface2);
 }
 
-.filter-row { margin-bottom: 16px; }
+.filter-row {
+    margin-bottom: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.search-input {
+    flex: 1;
+    min-width: 220px;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    transition: border-color var(--transition);
+}
+.search-input:focus { outline: none; border-color: var(--gold); }
+.search-input::placeholder { color: var(--text-dim); }
 
 /* =============================================
    ORDER DETAIL (MODAL)

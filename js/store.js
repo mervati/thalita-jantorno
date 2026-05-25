@@ -355,9 +355,9 @@ async function handleCheckoutSubmit(e) {
         ? activePackage.price
         : cart.reduce((s, p) => s + p.price, 0);
 
-    // Salva o pedido no banco
+    // Salva o pedido no banco e recupera o número gerado
     const photoIds = cart.map(p => p.id);
-    await db.from('orders').insert({
+    const { data: insertedOrder } = await db.from('orders').insert({
         customer_name: name,
         customer_phone: phone,
         customer_email: email || null,
@@ -366,25 +366,29 @@ async function handleCheckoutSubmit(e) {
         package_id: activePackage?.id || null,
         total: total,
         status: 'pending'
-    });
+    }).select('order_number').single();
+
+    const orderNumber = insertedOrder?.order_number;
 
     // Monta mensagem para WhatsApp
-    const msg = buildWhatsAppMessage({ name, phone, email, notes, total });
+    const msg = buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber });
     const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
 
     window.open(url, '_blank');
 }
 
-function buildWhatsAppMessage({ name, phone, email, notes, total }) {
+function buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber }) {
     const photoList = cart.map(p => {
         const eventName = p.events?.name || '';
         return `• Foto #${p.seq}${eventName ? ` (${eventName})` : ''}${activePackage ? '' : ` — ${formatPrice(p.price)}`}`;
     }).join('\n');
 
+    const numFormatado = orderNumber ? String(orderNumber).padStart(4, '0') : '----';
+
     const lines = [
         'Olá, Thalita! 😊',
         '',
-        '*📸 Nova Solicitação de Compra*',
+        `*📸 Pedido #${numFormatado} — Thalita Jantorno Fotografia*`,
         '',
         `*Cliente:* ${name}`,
         `*WhatsApp:* ${phone}`,

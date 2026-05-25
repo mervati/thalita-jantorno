@@ -345,8 +345,19 @@ function renderRecentOrders() {
 
 function renderOrdersTable() {
     const el = document.getElementById('ordersTableWrap');
-    if (!allOrders.length) { el.innerHTML = '<p class="loading-text">Nenhum pedido encontrado.</p>'; return; }
-    el.innerHTML = buildOrdersTable(allOrders);
+    const query = document.getElementById('ordersSearch')?.value.trim().toLowerCase() || '';
+    const filtered = filterOrders(query);
+    if (!filtered.length) { el.innerHTML = '<p class="loading-text">Nenhum pedido encontrado.</p>'; return; }
+    el.innerHTML = buildOrdersTable(filtered);
+}
+
+function filterOrders(query) {
+    if (!query) return allOrders;
+    return allOrders.filter(o =>
+        o.customer_name?.toLowerCase().includes(query) ||
+        o.customer_phone?.includes(query) ||
+        String(o.order_number || '').includes(query)
+    );
 }
 
 function buildOrdersTable(orders) {
@@ -354,6 +365,7 @@ function buildOrdersTable(orders) {
         <table class="orders-table">
             <thead>
                 <tr>
+                    <th>Pedido</th>
                     <th>Data</th>
                     <th>Cliente</th>
                     <th>WhatsApp</th>
@@ -365,6 +377,7 @@ function buildOrdersTable(orders) {
             <tbody>
                 ${orders.map(o => `
                     <tr onclick="openOrderModal('${o.id}')">
+                        <td><strong>#${String(o.order_number || 0).padStart(4,'0')}</strong></td>
                         <td>${formatDateTime(o.created_at)}</td>
                         <td>${o.customer_name}</td>
                         <td>${o.customer_phone}</td>
@@ -512,6 +525,9 @@ function bindAdminEvents() {
         await loadAdminOrders(e.target.value);
         renderOrdersTable();
     });
+
+    // Orders search
+    document.getElementById('ordersSearch').addEventListener('input', () => renderOrdersTable());
 
     // Photo filter
     document.getElementById('photoFilterEvent').addEventListener('change', e => {

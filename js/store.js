@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', async () => {
    CARREGAR DADOS
    ============================================= */
 async function loadEvents() {
-    const { data, error } = await supabase
+    const { data, error } = await db
         .from('events')
         .select('*')
         .eq('active', true)
@@ -38,7 +38,7 @@ async function loadEvents() {
 }
 
 async function loadPackages() {
-    const { data, error } = await supabase
+    const { data, error } = await db
         .from('packages')
         .select('*')
         .eq('active', true)
@@ -53,7 +53,7 @@ async function loadPackages() {
 async function loadPhotos(eventId = '') {
     showLoading(true);
 
-    let query = supabase
+    let query = db
         .from('photos')
         .select('*, events(name)')
         .eq('active', true)

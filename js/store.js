@@ -1,86 +1,149 @@
 /* =============================================
    ESTADO GLOBAL
    ============================================= */
-let allPhotos = [];
-let allPackages = [];
-let cart = [];          // array de photo objects selecionadas
-let activePackage = null; // package object ou null
+let allPhotos    = [];   // todas as fotos do banco
+let galleryPhotos = [];  // fotos do evento atual (para preview)
+let allPackages  = [];
+let allEvents    = [];
+let cart         = [];
+let activePackage  = null;
+let activeCoupon   = null;
+let currentEventId = null;
 
 /* =============================================
    INIT
    ============================================= */
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadEvents();
     await loadPackages();
-    await loadPhotos();
+    await Promise.all([loadAllEvents(), loadAllPhotos()]);
+    renderEventCards();
     bindEvents();
 });
 
 /* =============================================
    CARREGAR DADOS
    ============================================= */
-async function loadEvents() {
-    const { data, error } = await db
+async function loadAllEvents() {
+    const { data } = await db
         .from('events')
         .select('*')
         .eq('active', true)
         .order('date', { ascending: false });
+    allEvents = data || [];
+}
 
-    if (error || !data?.length) return;
-
-    const select = document.getElementById('eventFilter');
-    data.forEach(ev => {
-        const opt = document.createElement('option');
-        opt.value = ev.id;
-        opt.textContent = ev.name + (ev.date ? ` — ${formatDate(ev.date)}` : '');
-        select.appendChild(opt);
-    });
+async function loadAllPhotos() {
+    const { data } = await db
+        .from('photos')
+        .select('*, events(name)')
+        .eq('active', true)
+        .order('created_at', { ascending: true });
+    allPhotos = data || [];
 }
 
 async function loadPackages() {
-    const { data, error } = await db
+    const { data } = await db
         .from('packages')
         .select('*')
         .eq('active', true)
         .order('quantity', { ascending: true });
 
-    if (error || !data?.length) return;
-
-    allPackages = data;
-    renderPackages(data);
+    allPackages = data || [];
+    if (allPackages.length) renderPackages(allPackages);
+    document.getElementById('packagesSection').style.display = 'none';
 }
 
-async function loadPhotos(eventId = '') {
-    showLoading(true);
+/* =============================================
+   RENDERIZAR EVENTOS (cards)
+   ============================================= */
+function renderEventCards() {
+    const grid = document.getElementById('eventsGrid');
 
-    let query = db
-        .from('photos')
-        .select('*, events(name)')
-        .eq('active', true)
-        .order('created_at', { ascending: true });
+    const eventsWithPhotos = allEvents.filter(ev =>
+        allPhotos.some(p => p.event_id === ev.id)
+    );
 
-    if (eventId) query = query.eq('event_id', eventId);
+    if (!eventsWithPhotos.length) {
+        grid.innerHTML = `
+            <div class="events-empty">
+                <div class="empty-icon">📷</div>
+                <p>Nenhum evento disponível no momento.</p>
+                <small>Verifique em breve ou entre em contato.</small>
+            </div>`;
+        return;
+    }
 
-    const { data, error } = await query;
+    grid.innerHTML = eventsWithPhotos.map(ev => {
+        const evPhotos = allPhotos.filter(p => p.event_id === ev.id);
+        const cover    = evPhotos[0]?.url || '';
+        const count    = evPhotos.length;
 
-    showLoading(false);
+        return `
+        <div class="event-card" onclick="selectEvent('${ev.id}')">
+            <div class="event-card-img" style="background-image:url('${cover}')">
+                <div class="event-card-overlay"></div>
+                <div class="event-card-badge">${count} foto${count !== 1 ? 's' : ''}</div>
+            </div>
+            <div class="event-card-body">
+                <h3 class="event-card-name">${ev.name}</h3>
+                <div class="event-card-meta">
+                    ${ev.date        ? `<span class="event-card-date">${formatDate(ev.date)}</span>` : ''}
+                    ${ev.description ? `<span class="event-card-loc">${ev.description}</span>`       : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
 
-    if (error) { showEmpty(true); return; }
+/* =============================================
+   NAVEGAR PARA EVENTO
+   ============================================= */
+function selectEvent(eventId) {
+    currentEventId = eventId;
+    const ev = allEvents.find(e => e.id === eventId);
 
-    allPhotos = (data || []).map((p, i) => ({ ...p, seq: i + 1 }));
-    renderGallery(allPhotos);
+    // Filtra e numera fotos deste evento
+    const photos = allPhotos
+        .filter(p => p.event_id === eventId)
+        .map((p, i) => ({ ...p, seq: i + 1 }));
+
+    // Alterna seções
+    document.getElementById('eventsSection').style.display  = 'none';
+    document.getElementById('gallerySection').style.display = '';
+    if (allPackages.length) document.getElementById('packagesSection').style.display = '';
+
+    // Nome do evento no header da galeria
+    document.getElementById('galleryEventName').textContent = ev?.name || '';
+
+    // Limpa carrinho
+    cart = [];
+    activePackage = null;
+    activeCoupon  = null;
+    document.querySelectorAll('.package-card').forEach(el => el.classList.remove('selected'));
+    document.getElementById('couponInput').value    = '';
+    document.getElementById('couponFeedback').textContent = '';
+    updateCart();
+
+    renderGallery(photos);
+}
+
+function backToEvents() {
+    currentEventId = null;
+    document.getElementById('eventsSection').style.display   = '';
+    document.getElementById('gallerySection').style.display  = 'none';
+    document.getElementById('packagesSection').style.display = 'none';
+
+    cart = [];
+    activePackage = null;
+    activeCoupon  = null;
+    updateCart();
 }
 
 /* =============================================
    RENDERIZAR PACOTES
    ============================================= */
 function renderPackages(packages) {
-    const section = document.getElementById('packagesSection');
     const track = document.getElementById('packagesTrack');
-
-    if (!packages.length) { section.style.display = 'none'; return; }
-
-    section.style.display = '';
     track.innerHTML = packages.map(pkg => `
         <div class="package-card" data-id="${pkg.id}" onclick="selectPackage('${pkg.id}')">
             <div class="package-qty">${pkg.quantity}</div>
@@ -95,9 +158,14 @@ function renderPackages(packages) {
    RENDERIZAR GALERIA
    ============================================= */
 function renderGallery(photos) {
+    galleryPhotos = photos;
     const grid = document.getElementById('galleryGrid');
 
-    if (!photos.length) { showEmpty(true); grid.innerHTML = ''; return; }
+    if (!photos.length) {
+        showEmpty(true);
+        grid.innerHTML = '';
+        return;
+    }
     showEmpty(false);
 
     grid.innerHTML = photos.map(photo => `
@@ -126,10 +194,7 @@ function togglePhoto(photoId) {
         cart = cart.filter(p => p.id !== photoId);
     } else {
         if (activePackage) {
-            // Modo pacote: limita ao número do pacote
-            if (cart.length >= activePackage.quantity) {
-                cart.shift(); // remove o mais antigo
-            }
+            if (cart.length >= activePackage.quantity) cart.shift();
         }
         cart.push(photo);
     }
@@ -148,23 +213,17 @@ function updateCardUI(photoId, selected) {
    SELECIONAR PACOTE
    ============================================= */
 function selectPackage(pkgId) {
-    if (activePackage?.id === pkgId) {
-        removePackage();
-        return;
-    }
+    if (activePackage?.id === pkgId) { removePackage(); return; }
 
     const pkg = allPackages.find(p => p.id === pkgId);
     if (!pkg) return;
 
     activePackage = pkg;
-    cart = []; // limpa carrinho ao mudar para pacote
+    cart = [];
 
-    // Atualiza UI dos cards de pacote
     document.querySelectorAll('.package-card').forEach(el => {
         el.classList.toggle('selected', el.dataset.id === pkgId);
     });
-
-    // Remove checkmarks de fotos
     document.querySelectorAll('.photo-card').forEach(el => el.classList.remove('selected'));
 
     updateCart();
@@ -184,41 +243,39 @@ function removePackage() {
    ATUALIZAR CARRINHO (UI)
    ============================================= */
 function updateCart() {
-    const itemsEl = document.getElementById('cartItems');
-    const totalEl = document.getElementById('cartTotalValue');
-    const badgeEl = document.getElementById('cartBadge');
-    const countEl = document.getElementById('selectedCount');
+    const itemsEl     = document.getElementById('cartItems');
+    const totalEl     = document.getElementById('cartTotalValue');
+    const badgeEl     = document.getElementById('cartBadge');
+    const countEl     = document.getElementById('selectedCount');
     const checkoutBtn = document.getElementById('checkoutBtn');
-    const pkgInfo = document.getElementById('cartPackageInfo');
+    const pkgInfo     = document.getElementById('cartPackageInfo');
 
-    // Badge no botão do header
+    // Badge
     if (cart.length > 0) {
         badgeEl.style.display = 'flex';
-        badgeEl.textContent = cart.length;
+        badgeEl.textContent   = cart.length;
     } else {
         badgeEl.style.display = 'none';
     }
 
-    // Contagem abaixo do título
+    // Contador
     if (cart.length > 0) {
         countEl.style.display = 'inline';
-        countEl.textContent = `${cart.length} selecionada(s)`;
+        countEl.textContent   = `${cart.length} selecionada(s)`;
     } else {
         countEl.style.display = 'none';
     }
 
-    // Info do pacote no sidebar
+    // Info do pacote
     if (activePackage) {
         pkgInfo.style.display = '';
         document.getElementById('packageTagName').textContent = `${activePackage.name} — ${formatPrice(activePackage.price)}`;
-        const fill = document.getElementById('packageProgressFill');
-        const hint = document.getElementById('packageHint');
-        const pct = (cart.length / activePackage.quantity) * 100;
+        const fill      = document.getElementById('packageProgressFill');
+        const hint      = document.getElementById('packageHint');
+        const pct       = (cart.length / activePackage.quantity) * 100;
         fill.style.width = `${pct}%`;
         const remaining = activePackage.quantity - cart.length;
-        hint.textContent = remaining > 0
-            ? `Selecione mais ${remaining} foto(s)`
-            : 'Pacote completo! ✓';
+        hint.textContent = remaining > 0 ? `Selecione mais ${remaining} foto(s)` : 'Pacote completo! ✓';
     } else {
         pkgInfo.style.display = 'none';
     }
@@ -239,21 +296,75 @@ function updateCart() {
         `).join('');
     }
 
-    // Total
-    let total = 0;
+    // Subtotal e desconto
+    let subtotal = 0;
     if (activePackage) {
-        total = cart.length === activePackage.quantity ? activePackage.price : 0;
+        subtotal = cart.length === activePackage.quantity ? activePackage.price : 0;
     } else {
-        total = cart.reduce((sum, p) => sum + p.price, 0);
+        subtotal = cart.reduce((sum, p) => sum + p.price, 0);
     }
+
+    const discount = calcDiscount(subtotal);
+    const total    = Math.max(0, subtotal - discount);
+
+    const subtotalRow = document.getElementById('cartSubtotalRow');
+    const discountRow = document.getElementById('cartDiscountRow');
+    if (activeCoupon && discount > 0) {
+        subtotalRow.style.display = 'flex';
+        document.getElementById('cartSubtotalValue').textContent  = formatPrice(subtotal);
+        discountRow.style.display = 'flex';
+        document.getElementById('cartDiscountLabel').textContent  = `Cupom (${activeCoupon.code})`;
+        document.getElementById('cartDiscountValue').textContent  = `— ${formatPrice(discount)}`;
+    } else {
+        subtotalRow.style.display = 'none';
+        discountRow.style.display = 'none';
+    }
+
     totalEl.textContent = formatPrice(total);
 
-    // Habilitar checkout
-    const canCheckout = activePackage
-        ? cart.length === activePackage.quantity
-        : cart.length > 0;
-
+    const canCheckout  = activePackage ? cart.length === activePackage.quantity : cart.length > 0;
     checkoutBtn.disabled = !canCheckout;
+}
+
+function calcDiscount(subtotal) {
+    if (!activeCoupon) return 0;
+    if (activeCoupon.type === 'percent') return subtotal * (activeCoupon.value / 100);
+    return Math.min(activeCoupon.value, subtotal);
+}
+
+async function applyCoupon() {
+    const code     = document.getElementById('couponInput').value.trim().toUpperCase();
+    const feedback = document.getElementById('couponFeedback');
+    if (!code) return;
+
+    feedback.textContent = 'Verificando...';
+    feedback.className   = 'coupon-feedback';
+
+    const { data } = await db.from('coupons').select('*').eq('active', true).ilike('code', code).single();
+
+    if (!data) {
+        feedback.textContent = '✕ Cupom inválido ou expirado.';
+        feedback.className   = 'coupon-feedback coupon-error';
+        activeCoupon = null;
+    } else {
+        const today = new Date().toISOString().split('T')[0];
+        if (data.starts_at && today < data.starts_at) {
+            const d = data.starts_at.split('-').reverse().join('/');
+            feedback.textContent = `✕ Cupom válido somente a partir de ${d}.`;
+            feedback.className   = 'coupon-feedback coupon-error';
+            activeCoupon = null;
+        } else if (data.expires_at && today > data.expires_at) {
+            feedback.textContent = '✕ Cupom expirado.';
+            feedback.className   = 'coupon-feedback coupon-error';
+            activeCoupon = null;
+        } else {
+            activeCoupon = data;
+            const desc   = data.type === 'percent' ? `${data.value}% de desconto` : `${formatPrice(data.value)} de desconto`;
+            feedback.textContent = `✓ Cupom aplicado! ${desc}`;
+            feedback.className   = 'coupon-feedback coupon-success';
+        }
+    }
+    updateCart();
 }
 
 /* =============================================
@@ -263,27 +374,22 @@ let previewIndex = 0;
 
 function openPreview(photoId, e) {
     e?.stopPropagation();
-    const idx = allPhotos.findIndex(p => p.id === photoId);
+    const idx = galleryPhotos.findIndex(p => p.id === photoId);
     if (idx === -1) return;
     previewIndex = idx;
     showPreview();
 }
 
 function showPreview() {
-    const photo = allPhotos[previewIndex];
+    const photo  = galleryPhotos[previewIndex];
     const overlay = document.getElementById('previewOverlay');
-    const img = document.getElementById('previewImg');
-    const label = document.getElementById('previewLabel');
-    const price = document.getElementById('previewPrice');
-    const btn = document.getElementById('previewSelectBtn');
 
-    img.src = photo.url;
-    label.textContent = `Foto #${photo.seq}`;
-    price.textContent = formatPrice(photo.price);
+    document.getElementById('previewImg').src         = photo.url;
+    document.getElementById('previewLabel').textContent = `Foto #${photo.seq}`;
+    document.getElementById('previewPrice').textContent = formatPrice(photo.price);
 
     const isSelected = cart.some(p => p.id === photo.id);
-    btn.textContent = isSelected ? 'Remover seleção' : 'Selecionar foto';
-    btn.style.background = isSelected ? '' : '';
+    document.getElementById('previewSelectBtn').textContent = isSelected ? 'Remover seleção' : 'Selecionar foto';
 
     overlay.style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -313,15 +419,17 @@ function closeCart() {
    CHECKOUT
    ============================================= */
 function openCheckout() {
-    const total = activePackage
+    const subtotal = activePackage
         ? activePackage.price
         : cart.reduce((s, p) => s + p.price, 0);
+    const discount = calcDiscount(subtotal);
+    const total    = Math.max(0, subtotal - discount);
 
     const summaryText = activePackage
-        ? `${activePackage.name} — ${cart.length} foto(s) — Total: ${formatPrice(activePackage.price)}`
+        ? `${activePackage.name} — ${cart.length} foto(s) — Total: ${formatPrice(total)}`
         : `${cart.length} foto(s) — Total: ${formatPrice(total)}`;
 
-    document.getElementById('orderSummary').textContent = summaryText;
+    document.getElementById('orderSummary').textContent     = summaryText;
     document.getElementById('checkoutOverlay').style.display = 'flex';
     document.body.style.overflow = 'hidden';
 }
@@ -337,52 +445,51 @@ function closeCheckout() {
 async function handleCheckoutSubmit(e) {
     e.preventDefault();
 
-    const name = document.getElementById('custName').value.trim();
-    const phone = document.getElementById('custPhone').value.trim();
-    const email = document.getElementById('custEmail').value.trim();
-    const notes = document.getElementById('custNotes').value.trim();
+    const name    = document.getElementById('custName').value.trim();
+    const phone   = document.getElementById('custPhone').value.trim();
+    const email   = document.getElementById('custEmail').value.trim();
+    const notes   = document.getElementById('custNotes').value.trim();
     const errorEl = document.getElementById('formError');
 
     errorEl.style.display = 'none';
 
     if (!name || !phone) {
-        errorEl.textContent = 'Preencha nome e WhatsApp obrigatoriamente.';
+        errorEl.textContent   = 'Preencha nome e WhatsApp obrigatoriamente.';
         errorEl.style.display = '';
         return;
     }
 
-    const total = activePackage
-        ? activePackage.price
-        : cart.reduce((s, p) => s + p.price, 0);
+    const subtotal    = activePackage ? activePackage.price : cart.reduce((s, p) => s + p.price, 0);
+    const discount    = calcDiscount(subtotal);
+    const total       = Math.max(0, subtotal - discount);
+    const orderNumber = Math.floor(100000 + Math.random() * 900000);
+    const photoIds    = cart.map(p => p.id);
 
-    // Salva o pedido no banco e recupera o número gerado
-    const photoIds = cart.map(p => p.id);
-    const { data: insertedOrder } = await db.from('orders').insert({
-        customer_name: name,
+    await db.from('orders').insert({
+        customer_name:  name,
         customer_phone: phone,
         customer_email: email || null,
         customer_notes: notes || null,
-        photo_ids: photoIds,
-        package_id: activePackage?.id || null,
-        total: total,
-        status: 'pending'
-    }).select('order_number').single();
+        photo_ids:      photoIds,
+        package_id:     activePackage?.id || null,
+        coupon_code:    activeCoupon?.code || null,
+        discount_amount: discount,
+        total:          total,
+        order_number:   orderNumber,
+        status:         'pending'
+    });
 
-    const orderNumber = insertedOrder?.order_number;
-
-    // Monta mensagem para WhatsApp
-    const msg = buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber });
+    const msg = buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber, subtotal, discount });
     const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`;
-
     window.open(url, '_blank');
 }
 
-function buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber }) {
-    const numFormatado = orderNumber ? String(orderNumber).padStart(4, '0') : '----';
+function buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber, subtotal, discount }) {
+    const numFormatado = orderNumber ? String(orderNumber) : '------';
 
     const photoList = cart.map(p => {
         const eventName = p.events?.name || '';
-        const price = activePackage ? '' : ` — ${formatPrice(p.price)}`;
+        const price     = activePackage ? '' : ` — ${formatPrice(p.price)}`;
         return `* Foto #${p.seq}${eventName ? ` (${eventName})` : ''}${price}`;
     }).join('\n');
 
@@ -390,20 +497,22 @@ function buildWhatsAppMessage({ name, phone, email, notes, total, orderNumber })
         `Olá, ${name}!`,
         'Obrigada pelo pedido.',
         '',
-        `Pedido #${numFormatado} — Thalita Jantorno Fotografia`,
+        `*Pedido #${numFormatado} — Thalita Jantorno Fotografia*`,
         '',
-        `Cliente: ${name}`,
-        `WhatsApp: ${phone}`,
-        `E-mail: ${email || ''}`,
+        `*Cliente:* ${name}`,
+        `*WhatsApp:* ${phone}`,
+        `*E-mail:* ${email || ''}`,
         '',
         activePackage ? `Pacote: ${activePackage.name} (${activePackage.quantity} fotos)` : null,
         `Fotos selecionadas (${cart.length}):`,
         photoList,
         '',
+        activeCoupon && discount > 0 ? `Subtotal: ${formatPrice(subtotal)}` : null,
+        activeCoupon && discount > 0 ? `Cupom (${activeCoupon.code}): — ${formatPrice(discount)}` : null,
         `Total: ${formatPrice(total)}`,
         notes ? `\nObservações: ${notes}` : null,
         '',
-        'Mensagem gerada pelo site.'
+        '_Mensagem gerada pelo site._'
     ].filter(l => l !== null).join('\n');
 
     return lines;
@@ -429,15 +538,15 @@ function bindEvents() {
     // Preview
     document.getElementById('previewClose').addEventListener('click', closePreview);
     document.getElementById('previewPrev').addEventListener('click', () => {
-        previewIndex = (previewIndex - 1 + allPhotos.length) % allPhotos.length;
+        previewIndex = (previewIndex - 1 + galleryPhotos.length) % galleryPhotos.length;
         showPreview();
     });
     document.getElementById('previewNext').addEventListener('click', () => {
-        previewIndex = (previewIndex + 1) % allPhotos.length;
+        previewIndex = (previewIndex + 1) % galleryPhotos.length;
         showPreview();
     });
     document.getElementById('previewSelectBtn').addEventListener('click', () => {
-        togglePhoto(allPhotos[previewIndex].id);
+        togglePhoto(galleryPhotos[previewIndex].id);
         showPreview();
     });
     document.getElementById('previewOverlay').addEventListener('click', e => {
@@ -447,14 +556,20 @@ function bindEvents() {
     // Package remove
     document.getElementById('removePackageBtn').addEventListener('click', removePackage);
 
-    // Event filter
-    document.getElementById('eventFilter').addEventListener('change', e => {
-        loadPhotos(e.target.value);
-        cart = [];
-        activePackage = null;
-        document.querySelectorAll('.package-card').forEach(el => el.classList.remove('selected'));
-        updateCart();
+    // Cupom
+    document.getElementById('applyCouponBtn').addEventListener('click', applyCoupon);
+    document.getElementById('couponInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); applyCoupon(); }
     });
+    document.getElementById('couponInput').addEventListener('blur', () => {
+        if (document.getElementById('couponInput').value.trim()) applyCoupon();
+    });
+    document.getElementById('couponInput').addEventListener('input', e => {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    // Voltar para eventos
+    document.getElementById('backToEventsBtn').addEventListener('click', backToEvents);
 }
 
 /* =============================================
@@ -468,11 +583,6 @@ function formatDate(dateStr) {
     if (!dateStr) return '';
     const [year, month, day] = dateStr.split('-');
     return `${day}/${month}/${year}`;
-}
-
-function showLoading(show) {
-    document.getElementById('galleryLoading').style.display = show ? '' : 'none';
-    document.getElementById('galleryGrid').style.display = show ? 'none' : '';
 }
 
 function showEmpty(show) {

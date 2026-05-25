@@ -3,6 +3,7 @@
    ============================================= */
 let allOrders = [];
 let allEvents = [];
+let allCoupons = [];
 let selectedFiles = [];
 let currentOrderId = null;
 let adminEventsBound = false;
@@ -70,7 +71,8 @@ async function loadDashboard() {
     await Promise.all([
         loadAdminEvents(),
         loadAdminPackages(),
-        loadAdminOrders()
+        loadAdminOrders(),
+        loadAdminCoupons()
     ]);
     renderStats();
     renderRecentOrders();
@@ -103,7 +105,9 @@ function renderStats() {
     document.getElementById('statTotal').textContent = allOrders.length;
     document.getElementById('statPending').textContent = allOrders.filter(o => o.status === 'pending').length;
     document.getElementById('statDone').textContent = allOrders.filter(o => o.status === 'delivered').length;
-    const revenue = allOrders.reduce((s, o) => s + (o.total || 0), 0);
+    const revenue = allOrders
+        .filter(o => o.status !== 'cancelled')
+        .reduce((s, o) => s + (o.total || 0), 0);
     document.getElementById('statRevenue').textContent = formatPrice(revenue);
 }
 
@@ -221,12 +225,176 @@ async function deletePackage(id) {
 }
 
 /* =============================================
+   CUPONS
+   ============================================= */
+async function loadAdminCoupons() {
+    const { data } = await db.from('coupons').select('*').order('created_at', { ascending: false });
+    allCoupons = data || [];
+    renderCouponsList();
+}
+
+function renderCouponsList() {
+    const el = document.getElementById('couponsList');
+    if (!el) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const filterVal = document.getElementById('couponStatusFilter')?.value || '';
+
+    const coupons = allCoupons.filter(c => {
+        const expired = c.expires_at && today > c.expires_at;
+        const notStarted = c.starts_at && today < c.starts_at;
+        const isActive = c.active && !expired && !notStarted;
+        if (filterVal === 'active') return isActive;
+        if (filterVal === 'inactive') return !c.active;
+        if (filterVal === 'expired') return expired;
+        if (filterVal === 'not_started') return notStarted;
+        return true;
+    });
+
+    if (!coupons.length) { el.innerHTML = '<p class="loading-text">Nenhum cupom encontrado.</p>'; return; }
+    el.innerHTML = coupons.map(c => {
+        const expired = c.expires_at && today > c.expires_at;
+        const notStarted = c.starts_at && today < c.starts_at;
+        const isActive = c.active && !expired && !notStarted;
+
+        const dateRange = [
+            c.starts_at ? `De ${formatDate(c.starts_at)}` : null,
+            c.expires_at ? `até ${formatDate(c.expires_at)}` : null
+        ].filter(Boolean).join(' ');
+
+        const statusHtml = isActive
+            ? '<span style="color:var(--success)">Ativo</span>'
+            : expired
+                ? '<span style="color:#e05252">Inativo <small>(expirado)</small></span>'
+                : notStarted
+                    ? '<span style="color:#e0b252">Inativo <small>(não iniciado)</small></span>'
+                    : '<span style="color:var(--text-dim)">Inativo</span>';
+
+        return `
+        <div class="list-item" style="${!c.active ? 'opacity:0.8' : ''}">
+            <div class="list-item-main">
+                <div class="list-item-name coupon-code-tag">${c.code}</div>
+                <div class="list-item-meta">
+                    ${c.type === 'percent' ? `${c.value}% de desconto` : `${formatPrice(c.value)} de desconto`}
+                    · ${statusHtml}
+                    ${dateRange ? `· <span style="color:var(--text-muted)">${dateRange}</span>` : ''}
+                </div>
+            </div>
+            <div class="list-item-actions">
+                <button class="btn-secondary" onclick="toggleCoupon('${c.id}', ${c.active})">${c.active ? 'Desativar' : 'Ativar'}</button>
+                <button class="btn-secondary" onclick="openCouponEdit('${c.id}')">Editar</button>
+                <button class="btn-danger-sm" onclick="deleteCoupon('${c.id}')">Excluir</button>
+            </div>
+        </div>
+    `;
+    }).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const couponForm = document.getElementById('couponForm');
+    if (!couponForm) return;
+
+    document.getElementById('couponCode').addEventListener('input', e => {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    document.getElementById('couponType').addEventListener('change', e => {
+        document.getElementById('couponValueLabel').textContent =
+            e.target.value === 'percent' ? 'Valor (%) *' : 'Valor (R$) *';
+    });
+
+    couponForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = document.getElementById('couponCode').value.trim().toUpperCase();
+        const type = document.getElementById('couponType').value;
+        const value = parseFloat(document.getElementById('couponValue').value);
+        const startsAt = document.getElementById('couponStartDate').value || null;
+        const expiresAt = document.getElementById('couponEndDate').value || null;
+        if (!code || !value) return;
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Criando...';
+
+        const { error } = await db.from('coupons').insert({ code, type, value, active: true, starts_at: startsAt, expires_at: expiresAt });
+
+        btn.disabled = false; btn.textContent = 'Criar Cupom';
+        if (!error) { e.target.reset(); await loadAdminCoupons(); }
+        else if (error.code === '23505') alert('Já existe um cupom com esse código.');
+    });
+});
+
+async function toggleCoupon(id, currentActive) {
+    await db.from('coupons').update({ active: !currentActive }).eq('id', id);
+    await loadAdminCoupons();
+}
+
+async function deleteCoupon(id) {
+    if (!confirm('Excluir este cupom?')) return;
+    await db.from('coupons').delete().eq('id', id);
+    await loadAdminCoupons();
+}
+
+let editingCouponId = null;
+
+function openCouponEdit(id) {
+    const coupon = allCoupons.find(c => c.id === id);
+    if (!coupon) return;
+
+    editingCouponId = id;
+    document.getElementById('couponEditName').textContent = coupon.code;
+    document.getElementById('couponEditStartDate').value = coupon.starts_at || '';
+    document.getElementById('couponEditEndDate').value = coupon.expires_at || '';
+    document.getElementById('couponEditError').style.display = 'none';
+    document.getElementById('couponEditOverlay').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeCouponEdit() {
+    document.getElementById('couponEditOverlay').style.display = 'none';
+    document.body.style.overflow = '';
+    editingCouponId = null;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('couponEditClose')?.addEventListener('click', closeCouponEdit);
+    document.getElementById('couponEditOverlay')?.addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeCouponEdit();
+    });
+    document.getElementById('couponEditForm')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!editingCouponId) return;
+
+        const startsAt = document.getElementById('couponEditStartDate').value || null;
+        const expiresAt = document.getElementById('couponEditEndDate').value || null;
+        const errEl = document.getElementById('couponEditError');
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Salvando...';
+
+        const { error } = await db.from('coupons').update({ starts_at: startsAt, expires_at: expiresAt }).eq('id', editingCouponId);
+
+        btn.disabled = false; btn.textContent = 'Salvar';
+
+        if (error) {
+            errEl.textContent = 'Erro ao salvar. Tente novamente.';
+            errEl.style.display = '';
+        } else {
+            closeCouponEdit();
+            await loadAdminCoupons();
+        }
+    });
+});
+
+/* =============================================
    FOTOS — UPLOAD
    ============================================= */
 const uploadZone = document.getElementById('uploadZone');
 const uploadFilesInput = document.getElementById('uploadFiles');
 
-uploadZone.addEventListener('click', () => uploadFilesInput.click());
+uploadZone.addEventListener('click', e => {
+    if (e.target === uploadFilesInput) return;
+    uploadFilesInput.click();
+});
 uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
 uploadZone.addEventListener('drop', e => {
@@ -234,21 +402,55 @@ uploadZone.addEventListener('drop', e => {
     uploadZone.classList.remove('dragover');
     handleFileSelection(e.dataTransfer.files);
 });
-uploadFilesInput.addEventListener('change', e => handleFileSelection(e.target.files));
+uploadFilesInput.addEventListener('change', e => {
+    handleFileSelection(e.target.files);
+    e.target.value = ''; // permite re-selecionar os mesmos arquivos
+});
 
 function handleFileSelection(files) {
-    selectedFiles = Array.from(files);
-    if (!selectedFiles.length) return;
+    const incoming = Array.from(files);
+    // acumula sem duplicar (mesmo nome + mesmo tamanho)
+    incoming.forEach(f => {
+        const exists = selectedFiles.some(s => s.name === f.name && s.size === f.size);
+        if (!exists) selectedFiles.push(f);
+    });
+    renderUploadPreview();
+}
 
+function renderUploadPreview() {
     const preview = document.getElementById('uploadPreview');
+    if (!selectedFiles.length) {
+        preview.style.display = 'none';
+        preview.innerHTML = '';
+        document.getElementById('uploadBtn').disabled = true;
+        return;
+    }
+
     preview.style.display = 'flex';
-    preview.innerHTML = selectedFiles.map((f, i) => `
-        <div class="upload-preview-item">
-            <img src="${URL.createObjectURL(f)}" alt="${f.name}">
-        </div>
-    `).join('');
+    preview.innerHTML = selectedFiles.map((f, i) => {
+        const isHeic = f.type === 'image/heic' || f.type === 'image/heif' ||
+                       /\.(heic|heif)$/i.test(f.name);
+        if (isHeic) {
+            return `
+                <div class="upload-preview-item upload-preview-heic">
+                    <button class="preview-remove-btn" onclick="removePreviewFile(${i})" title="Remover">✕</button>
+                    <div class="heic-icon">📷</div>
+                    <small class="heic-name">${f.name}</small>
+                </div>`;
+        }
+        return `
+            <div class="upload-preview-item">
+                <button class="preview-remove-btn" onclick="removePreviewFile(${i})" title="Remover">✕</button>
+                <img src="${URL.createObjectURL(f)}" alt="${f.name}">
+            </div>`;
+    }).join('');
 
     document.getElementById('uploadBtn').disabled = false;
+}
+
+function removePreviewFile(index) {
+    selectedFiles.splice(index, 1);
+    renderUploadPreview();
 }
 
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
@@ -266,38 +468,65 @@ document.getElementById('uploadForm').addEventListener('submit', async (e) => {
     btn.disabled = true;
     progressWrap.style.display = '';
 
+    let successCount = 0;
+    let failedFiles = [];
+
     for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
+        let file = selectedFiles[i];
         const pct = Math.round(((i) / selectedFiles.length) * 100);
         progressBar.style.width = `${pct}%`;
-        progressText.textContent = `Enviando ${i + 1} de ${selectedFiles.length}...`;
+        progressText.textContent = `Enviando ${i + 1} de ${selectedFiles.length}: ${file.name}`;
 
-        const ext = file.name.split('.').pop().toLowerCase();
-        const path = `${eventId}/${Date.now()}-${i}.${ext}`;
+        try {
+            // Converte HEIC/HEIF para JPEG
+            file = await convertHeicToJpeg(file);
 
-        const { error: uploadError } = await db.storage.from('photos').upload(path, file, { upsert: false });
-        if (uploadError) { console.error(uploadError); continue; }
+            const ext = file.name.split('.').pop().toLowerCase();
+            const path = `${eventId}/${Date.now()}-${i}.${ext}`;
 
-        const { data: urlData } = db.storage.from('photos').getPublicUrl(path);
+            const { error: uploadError } = await db.storage.from('photos').upload(path, file, { upsert: false });
+            if (uploadError) {
+                console.error(`Erro no upload de ${file.name}:`, uploadError);
+                failedFiles.push(file.name);
+                continue;
+            }
 
-        await db.from('photos').insert({
-            event_id: eventId,
-            storage_path: path,
-            url: urlData.publicUrl,
-            price: price,
-            active: true
-        });
+            const { data: urlData } = db.storage.from('photos').getPublicUrl(path);
+
+            const { error: dbError } = await db.from('photos').insert({
+                event_id: eventId,
+                storage_path: path,
+                url: urlData.publicUrl,
+                price: price,
+                active: true
+            });
+
+            if (dbError) {
+                console.error(`Erro ao salvar ${file.name} no banco:`, dbError);
+                failedFiles.push(file.name);
+            } else {
+                successCount++;
+            }
+        } catch (e) {
+            console.error(`Erro inesperado em ${file.name}:`, e);
+            failedFiles.push(file.name);
+        }
     }
 
     progressBar.style.width = '100%';
-    progressText.textContent = `Upload concluído! ${selectedFiles.length} foto(s) enviada(s).`;
+
+    if (failedFiles.length > 0) {
+        progressText.textContent = `Concluído: ${successCount} enviada(s), ${failedFiles.length} com erro.`;
+        alert(`${successCount} foto(s) enviada(s) com sucesso.\n\nFalha ao enviar:\n• ${failedFiles.join('\n• ')}\n\nVerifique o tamanho dos arquivos e tente novamente.`);
+    } else {
+        progressText.textContent = `Upload concluído! ${successCount} foto(s) enviada(s).`;
+    }
 
     setTimeout(async () => {
         progressWrap.style.display = 'none';
-        document.getElementById('uploadPreview').style.display = 'none';
         document.getElementById('uploadForm').reset();
         selectedFiles = [];
-        btn.disabled = true;
+        renderUploadPreview();
         await renderAdminPhotos();
     }, 2000);
 });
@@ -372,18 +601,20 @@ function buildOrdersTable(orders) {
                     <th>Fotos</th>
                     <th>Total</th>
                     <th>Status</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 ${orders.map(o => `
                     <tr onclick="openOrderModal('${o.id}')">
-                        <td><strong>#${String(o.order_number || 0).padStart(4,'0')}</strong></td>
+                        <td><strong>#${o.order_number || '------'}</strong></td>
                         <td>${formatDateTime(o.created_at)}</td>
                         <td>${o.customer_name}</td>
                         <td>${o.customer_phone}</td>
                         <td>${(o.photo_ids || []).length} foto(s)</td>
                         <td>${formatPrice(o.total)}</td>
                         <td><span class="status-badge status-${o.status}">${statusLabel(o.status)}</span></td>
+                        <td><button class="btn-delete-order" onclick="deleteOrder('${o.id}', event)" title="Excluir pedido"><img src="5028066.png" alt="Excluir"></button></td>
                     </tr>
                 `).join('')}
             </tbody>
@@ -391,8 +622,21 @@ function buildOrdersTable(orders) {
     `;
 }
 
+async function deleteOrder(id, event) {
+    event.stopPropagation();
+    event.preventDefault();
+    const row = event.currentTarget.closest('tr');
+    if (!confirm('Excluir este pedido permanentemente? Esta ação não pode ser desfeita.')) return;
+    const { error } = await db.from('orders').delete().eq('id', id);
+    if (error) { alert('Erro ao excluir pedido.'); return; }
+    allOrders = allOrders.filter(o => o.id !== id);
+    if (row) row.remove();
+    renderStats();
+    renderRecentOrders();
+}
+
 function statusLabel(s) {
-    return { pending: 'Pendente', confirmed: 'Confirmado', delivered: 'Entregue' }[s] || s;
+    return { pending: 'Pendente', confirmed: 'Confirmado', delivered: 'Entregue', cancelled: 'Cancelado' }[s] || s;
 }
 
 /* =============================================
@@ -442,6 +686,7 @@ async function openOrderModal(orderId) {
             <button class="btn-secondary" onclick="updateStatus('pending')">Pendente</button>
             <button class="btn-secondary" onclick="updateStatus('confirmed')">Confirmado</button>
             <button class="btn-primary" onclick="updateStatus('delivered')">Entregue</button>
+            <button class="btn-cancel" onclick="updateStatus('cancelled')">Cancelado</button>
             <a href="https://wa.me/${order.customer_phone.replace(/\D/g,'')}?text=${encodeURIComponent(`Olá ${order.customer_name}! Suas fotos estão prontas.`)}" target="_blank" class="btn-secondary" style="margin-left:auto">WhatsApp ↗</a>
         </div>
     `;
@@ -512,6 +757,8 @@ function bindAdminEvents() {
 
         if (section === 'fotos') renderAdminPhotos();
         if (section === 'pedidos') renderOrdersTable();
+        if (section === 'cupons') loadAdminCoupons();
+
     });
 
     // Order modal close
@@ -533,6 +780,9 @@ function bindAdminEvents() {
     document.getElementById('photoFilterEvent').addEventListener('change', e => {
         renderAdminPhotos(e.target.value);
     });
+
+    // Coupon filter
+    document.getElementById('couponStatusFilter')?.addEventListener('change', () => renderCouponsList());
 
     // Export
     document.getElementById('exportBtn').addEventListener('click', exportCSV);
@@ -559,4 +809,20 @@ function formatDateTime(iso) {
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+async function convertHeicToJpeg(file) {
+    const isHeic = file.type === 'image/heic' || file.type === 'image/heif' ||
+                   /\.(heic|heif)$/i.test(file.name);
+    if (!isHeic || typeof heic2any === 'undefined') return file;
+
+    try {
+        const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+        const converted = Array.isArray(blob) ? blob[0] : blob;
+        const newName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+        return new File([converted], newName, { type: 'image/jpeg' });
+    } catch (e) {
+        console.warn('Falha ao converter HEIC, enviando original:', e);
+        return file;
+    }
 }

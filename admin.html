@@ -45,6 +45,7 @@
                 <button class="nav-tab" data-section="fotos">Fotos</button>
                 <button class="nav-tab" data-section="pacotes">Pacotes</button>
                 <button class="nav-tab" data-section="pedidos">Pedidos</button>
+                <button class="nav-tab" data-section="cupons">Cupons</button>
             </div>
             <button class="btn-logout" id="logoutBtn">Sair</button>
         </nav>
@@ -132,9 +133,9 @@
                             <label>Fotos *</label>
                             <div class="upload-zone" id="uploadZone">
                                 <div class="upload-icon">📷</div>
-                                <p>Arraste as fotos aqui ou <label for="uploadFiles" class="upload-link">clique para selecionar</label></p>
+                                <p>Arraste as fotos aqui ou <label class="upload-link">clique para selecionar</label></p>
                                 <small>JPG, PNG — múltiplas fotos aceitas</small>
-                                <input type="file" id="uploadFiles" multiple accept="image/jpeg,image/png,image/webp" style="display:none">
+                                <input type="file" id="uploadFiles" multiple accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style="display:none">
                             </div>
                         </div>
 
@@ -194,6 +195,59 @@
                 </div>
             </section>
 
+            <!-- Seção: Cupons -->
+            <section id="secCupons" class="admin-section" style="display:none">
+                <h2 class="admin-section-title">Cupons de Desconto</h2>
+
+                <div class="card">
+                    <h3 class="card-title">Novo Cupom</h3>
+                    <form id="couponForm" novalidate>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="couponCode">Código *</label>
+                                <input type="text" id="couponCode" required placeholder="Ex: DESCONTO10" style="text-transform:uppercase">
+                            </div>
+                            <div class="form-field">
+                                <label for="couponType">Tipo *</label>
+                                <select id="couponType" required>
+                                    <option value="percent">Porcentagem (%)</option>
+                                    <option value="fixed">Valor fixo (R$)</option>
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label for="couponValue" id="couponValueLabel">Valor (%) *</label>
+                                <input type="number" id="couponValue" required min="0" step="0.01" placeholder="10">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="couponStartDate">Início <span class="optional">(opcional)</span></label>
+                                <input type="date" id="couponStartDate">
+                            </div>
+                            <div class="form-field">
+                                <label for="couponEndDate">Fim <span class="optional">(opcional)</span></label>
+                                <input type="date" id="couponEndDate">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-primary">Criar Cupom</button>
+                    </form>
+                </div>
+
+                <h3 class="admin-section-subtitle">Cupons Cadastrados</h3>
+                <div class="filter-row" style="margin-bottom:12px">
+                    <select id="couponStatusFilter" class="select-input">
+                        <option value="">Todos</option>
+                        <option value="active">Ativos</option>
+                        <option value="inactive">Inativos</option>
+                        <option value="expired">Expirados</option>
+                        <option value="not_started">Não iniciados</option>
+                    </select>
+                </div>
+                <div id="couponsList" class="list-container">
+                    <p class="loading-text">Carregando...</p>
+                </div>
+            </section>
+
             <!-- Seção: Pedidos -->
             <section id="secPedidos" class="admin-section" style="display:none">
                 <div class="section-header-row">
@@ -208,6 +262,7 @@
                         <option value="pending">Pendente</option>
                         <option value="confirmed">Confirmado</option>
                         <option value="delivered">Entregue</option>
+                        <option value="cancelled">Cancelado</option>
                     </select>
                 </div>
 
@@ -217,6 +272,33 @@
             </section>
 
         </main>
+    </div>
+
+    <!-- Coupon Edit Modal -->
+    <div class="overlay" id="couponEditOverlay" style="display:none">
+        <div class="modal" id="couponEditModal">
+            <div class="modal-head">
+                <h3>Editar Cupom</h3>
+                <button class="icon-btn" id="couponEditClose">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="couponEditName" style="font-weight:600;margin-bottom:12px"></p>
+                <form id="couponEditForm" novalidate>
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="couponEditStartDate">Início <span class="optional">(opcional)</span></label>
+                            <input type="date" id="couponEditStartDate">
+                        </div>
+                        <div class="form-field">
+                            <label for="couponEditEndDate">Fim <span class="optional">(opcional)</span></label>
+                            <input type="date" id="couponEditEndDate">
+                        </div>
+                    </div>
+                    <div class="form-error" id="couponEditError" style="display:none"></div>
+                    <button type="submit" class="btn-primary btn-block">Salvar</button>
+                </form>
+            </div>
+        </div>
     </div>
 
     <!-- Order Detail Modal -->
@@ -231,7 +313,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
     <script src="js/config.js?v=2"></script>
-    <script src="js/admin.js?v=2"></script>
+    <script src="js/admin.js?v=3"></script>
 </body>
 </html>
